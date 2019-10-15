@@ -8,26 +8,42 @@
 
 #import "AppDelegate.h"
 
-@interface AppDelegate ()<NSURLSessionDelegate>
+@interface AppDelegate ()<NSURLSessionDelegate,NSURLSessionTaskDelegate,NSURLSessionDownloadDelegate>
+
+@property (nonatomic, strong) NSMutableDictionary *completionHandlerDictionary;
 
 @end
 
 @implementation AppDelegate
 
-- (NSURLSession *)backgroundURLSession {
+- (NSURLSession *)backgroundDownloadURLSession {
     static NSURLSession *session = nil;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        NSString *identifier = @"com.yourcompany.appId.BackgroundSession";
+        NSString *identifier = @"com.conan.BackgroundDownloadDemo";
         NSURLSessionConfiguration* sessionConfig = [NSURLSessionConfiguration backgroundSessionConfigurationWithIdentifier:identifier];
         session = [NSURLSession sessionWithConfiguration:sessionConfig
                                                 delegate:self
-                                           delegateQueue:[NSOperationQueue mainQueue]];
+                                           delegateQueue:nil];
     });
     
     return session;
 }
 
+- (void)beginDownloadWithUrl:(NSString *)downloadURLString {
+    NSURL *downloadURL = [NSURL URLWithString:downloadURLString];
+    NSURLRequest *request = [NSURLRequest requestWithURL:downloadURL];
+    NSURLSession *session = [self backgroundDownloadURLSession];
+    NSURLSessionDownloadTask *downloadTask = [session downloadTaskWithRequest:request];
+    [downloadTask resume];
+}
+
+- (NSMutableDictionary *)completionHandlerDictionary{
+    if (!_completionHandlerDictionary) {
+        _completionHandlerDictionary = [NSMutableDictionary dictionary];
+    }
+    return _completionHandlerDictionary;
+}
 
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
     // Override point for customization after application launch.
@@ -61,8 +77,54 @@
     // Called when the application is about to terminate. Save data if appropriate. See also applicationDidEnterBackground:.
 }
 
+- (void)application:(UIApplication *)application performFetchWithCompletionHandler:(void (^)(UIBackgroundFetchResult))completionHandler{
+    //检查是否有需要继续下载的任务
+}
+
 - (void)application:(UIApplication *)application handleEventsForBackgroundURLSession:(NSString *)identifier completionHandler:(void (^)(void))completionHandler{
+    NSURLSession *session = [self backgroundDownloadURLSession];
+    if ([identifier isEqualToString:session.configuration.identifier]) {
+        self.completionHandlerDictionary[identifier] = completionHandler;
+    }
+}
+
+#pragma mark - NSURLSessionTaskDelegate
+- (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didCompleteWithError:(NSError *)error{
+    if (error) {
+        // check if resume data are available
+        if ([error.userInfo objectForKey:NSURLSessionDownloadTaskResumeData]) {
+            NSData *resumeData = [error.userInfo objectForKey:NSURLSessionDownloadTaskResumeData];
+            NSURLSessionTask *task = [[self backgroundDownloadURLSession] downloadTaskWithResumeData:resumeData];
+            [task resume];
+        }
+    }
+}
+
+#pragma mark - NSURLSessionDownloadDelegate
+- (void)URLSession:(NSURLSession *)session downloadTask:(NSURLSessionDownloadTask *)downloadTask didFinishDownloadingToURL:(NSURL *)location{
+    /*
+     将下载完成的文件从临时目录移动到指定目录
+     [[NSFileManager defaultManager] moveItemAtURL:location toURL:destination error:nil];
+     */
     
+}
+
+- (void)URLSession:(NSURLSession *)session downloadTask:(NSURLSessionDownloadTask *)downloadTask didWriteData:(int64_t)bytesWritten totalBytesWritten:(int64_t)totalBytesWritten totalBytesExpectedToWrite:(int64_t)totalBytesExpectedToWrite{
+    
+}
+
+- (void)URLSession:(NSURLSession *)session downloadTask:(NSURLSessionDownloadTask *)downloadTask didResumeAtOffset:(int64_t)fileOffset expectedTotalBytes:(int64_t)expectedTotalBytes{
+    
+}
+
+#pragma mark - NSURLSessionDelegate
+- (void)URLSessionDidFinishEventsForBackgroundURLSession:(NSURLSession *)session{
+    if (session.configuration.identifier && self.completionHandlerDictionary[session.configuration.identifier]) {
+        void(^handler)(void) = self.completionHandlerDictionary[session.configuration.identifier];
+        if (handler) {
+            handler();
+        }
+    }
 }
 
 
